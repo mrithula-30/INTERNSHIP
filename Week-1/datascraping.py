@@ -4,12 +4,10 @@ from bs4 import BeautifulSoup
 from PIL import Image
 import pandas as pd
 
-
 def scrape_url(url):
     try:
         response = requests.get(url, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
-
         paragraphs = soup.find_all('p')
         with open('paragraphs.txt', 'a', encoding='utf-8') as f:
             f.write(f"\n--- Paragraphs from {url} ---\n")
@@ -17,9 +15,9 @@ def scrape_url(url):
                 text = p.get_text(strip=True)
                 if text:
                     f.write(text + '\n\n')
-
-        images = soup.find_all('img')
+                    images = soup.find_all('img')
         image_count = 0
+        image_filenames = []
         for i, img in enumerate(images):
             src = img.get('src')
             if not src:
@@ -36,29 +34,26 @@ def scrape_url(url):
             try:
                 img_data = requests.get(src, timeout=5).content
                 safe_url = ''.join(c if c.isalnum() or c in ('-', '_', '.') else '_' for c in src)
-                filename = safe_url
+                filename = f"{safe_url}.jpg"
                 with open(filename, 'wb') as f:
                     f.write(img_data)
-                    image_count += 1
+                image_filenames.append(filename)
+                image_count += 1
             except Exception:
                 continue
-
         tables = []
         html_tables = soup.find_all("table")
 
         for table_tag in html_tables:
             headers = []
             rows = []
-
             for th in table_tag.find_all("th"):
                 headers.append(th.get_text(strip=True))
-
             for tr in table_tag.find_all("tr"):
                 cells = tr.find_all(["td", "th"])
                 if cells:
                     row = [cell.get_text(strip=True) for cell in cells]
                     rows.append(row)
-
             if rows:
                 df = pd.DataFrame(rows)
                 if headers and len(headers) == len(df.columns):
@@ -66,18 +61,16 @@ def scrape_url(url):
                 tables.append(df)
                 df.to_csv(f"table_{len(tables)}.csv", index=False)
 
-        return len(paragraphs), image_count, tables
+        return len(paragraphs), image_count, tables, image_filenames
 
     except Exception as e:
-        return f"Error: {e}", 0, []
-
-
+        return f"Error: {e}", 0, [], []
 def main():
     st.set_page_config(page_title="Web Scraper", page_icon="🕸️")
 
     try:
         img = Image.open("/home/sensen/Downloads/scrapping.jpg")
-        st.image(img, use_column_width=True)
+        st.image(img, use_container_width=True)
     except FileNotFoundError:
         st.warning("Header image not found.")
 
@@ -110,15 +103,46 @@ def main():
 
             for url in urls:
                 with st.spinner(f"Scraping {url}..."):
-                    paragraphs, images, tables = scrape_url(url)
+                    paragraphs, image_count, tables, image_filenames = scrape_url(url)
 
-                    if isinstance(paragraphs, str):
+                    if isinstance(paragraphs, str): 
                         st.error(paragraphs)
-                    else:
-                        st.success(f"✅ {url} — {paragraphs} paragraphs, {images} images downloaded.")
+                        continue
 
-                        if tables:
-                            st.subheader(f"Tables found in {url}")
+                    st.success(f"✅ {url} — {paragraphs} paragraphs, {image_count} images downloaded.")
+                    with st.expander(f"📄 View Paragraphs from {url}"):
+                        with open('paragraphs.txt', 'r', encoding='utf-8') as f:
+                            all_text = f.read()
+                            relevant_text = []
+                            capture = False
+                            for line in all_text.splitlines():
+                                if f"--- Paragraphs from {url} ---" in line:
+                                    capture = True
+                                    continue
+                                elif line.startswith("--- Paragraphs from"):
+                                    capture = False
+                                if capture:
+                                    relevant_text.append(line)
+                            if relevant_text:
+                                st.text("\n".join(relevant_text))
+                            else:
+                                st.info("No paragraphs found.")
+
+                    
+                    with st.expander(f"🖼️ View Images from {url}"):
+                        if image_filenames:
+                            for img_file in image_filenames:
+                                try:
+                                    img = Image.open(img_file)
+                                    st.image(img, use_container_width=True, caption=img_file)
+                                except:
+                                    continue
+                        else:
+                            st.info("No images found or saved.")
+
+                    
+                    if tables:
+                        with st.expander(f"📊 View Tables from {url}"):
                             for idx, table in enumerate(tables):
                                 st.markdown(f"**Table {idx+1}**")
                                 st.dataframe(table)
@@ -130,8 +154,8 @@ def main():
                                     file_name=csv_filename,
                                     mime='text/csv'
                                 )
-                        else:
-                            st.info("No tables found on this page.")
+                    else:
+                        st.info("No tables found on this page.")
 
             st.balloons()
         else:
